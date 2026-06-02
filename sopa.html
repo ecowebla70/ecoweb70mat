@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="es" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sopa de Letras Ecológica</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&amp;display=swap" rel="stylesheet">
+  <style>
+    * { font-family: 'Outfit', sans-serif; }
+    .cell {
+      user-select: none;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .cell:hover { transform: scale(1.1); }
+    .cell.selected { background: #34d399 !important; color: #fff; border-radius: 6px; }
+    .cell.found { background: #059669 !important; color: #fff; border-radius: 6px; }
+    .word-found { text-decoration: line-through; opacity: 0.5; }
+    .selecting { background: #a7f3d0; border-radius: 6px; }
+  </style>
+  <style>body { box-sizing: border-box; }</style>
+  <script src="/_sdk/data_sdk.js" type="text/javascript"></script>
+ <script src="/_sdk/telemetry_sdk.js"></script></head>
+ <body class="h-full">
+  <div id="app" class="h-full w-full bg-gradient-to-br from-emerald-900 via-teal-800 to-green-900 overflow-auto p-4 flex flex-col items-center justify-start">
+   <header class="text-center mb-4">
+    <h1 id="main-title" class="text-3xl md:text-4xl font-extrabold text-emerald-100 tracking-tight">🌍 Sopa de Letras</h1>
+    <p class="text-emerald-300 text-sm mt-1">Encuentra las 10 palabras ocultas</p>
+    <p id="counter" class="text-emerald-200 font-bold mt-1">0 / 10 encontradas</p>
+   </header>
+   <div class="flex flex-col lg:flex-row gap-4 items-start justify-center w-full max-w-4xl">
+    <div id="grid-container" class="bg-emerald-950/60 backdrop-blur rounded-xl p-3 shadow-2xl border border-emerald-700/40"></div>
+    <div class="bg-emerald-950/60 backdrop-blur rounded-xl p-4 shadow-2xl border border-emerald-700/40 w-full lg:w-48">
+     <h2 class="text-emerald-300 font-bold mb-2 text-sm uppercase tracking-wide">Palabras</h2>
+     <ul id="word-list" class="space-y-1"></ul>
+    </div>
+   </div>
+   <div id="win-msg" class="hidden mt-4 bg-emerald-400 text-emerald-950 font-bold px-6 py-3 rounded-xl text-lg animate-bounce">
+    🎉 ¡Felicidades! ¡Las encontraste todas!
+   </div>
+  </div>
+  <script>
+const WORDS = ['ODS','DEFORESTACION','RESIDUO','RECICLAR','REUTILIZAR','CONTAMINACION','HUELLA','ECOLOGIA','REDUCIR','TIERRA'];
+const GRID_SIZE = 15;
+const DIRECTIONS = [[0,1],[1,0],[1,1],[1,-1],[0,-1],[-1,0],[-1,-1],[-1,1]];
+
+let grid = [], placed = [], foundWords = new Set();
+let selecting = false, startCell = null, currentCells = [];
+
+function initGrid() {
+  grid = Array.from({length: GRID_SIZE}, () => Array(GRID_SIZE).fill(''));
+  placed = [];
+  foundWords = new Set();
+
+  const shuffled = [...WORDS].sort(() => Math.random() - 0.5);
+  for (const word of shuffled) placeWord(word);
+
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  for (let r = 0; r < GRID_SIZE; r++)
+    for (let c = 0; c < GRID_SIZE; c++)
+      if (!grid[r][c]) grid[r][c] = letters[Math.floor(Math.random()*26)];
+}
+
+function placeWord(word) {
+  for (let attempts = 0; attempts < 200; attempts++) {
+    const dir = DIRECTIONS[Math.floor(Math.random()*DIRECTIONS.length)];
+    const r = Math.floor(Math.random()*GRID_SIZE);
+    const c = Math.floor(Math.random()*GRID_SIZE);
+    if (canPlace(word, r, c, dir)) {
+      for (let i = 0; i < word.length; i++) grid[r+dir[0]*i][c+dir[1]*i] = word[i];
+      placed.push({word, r, c, dir});
+      return;
+    }
+  }
+}
+
+function canPlace(word, r, c, dir) {
+  for (let i = 0; i < word.length; i++) {
+    const nr = r+dir[0]*i, nc = c+dir[1]*i;
+    if (nr<0||nr>=GRID_SIZE||nc<0||nc>=GRID_SIZE) return false;
+    if (grid[nr][nc] && grid[nr][nc] !== word[i]) return false;
+  }
+  return true;
+}
+
+function renderGrid() {
+  const container = document.getElementById('grid-container');
+  let html = '<div class="grid gap-0.5" style="grid-template-columns:repeat('+GRID_SIZE+',1fr)">';
+  for (let r = 0; r < GRID_SIZE; r++)
+    for (let c = 0; c < GRID_SIZE; c++)
+      html += `<div class="cell w-6 h-6 md:w-7 md:h-7 flex items-center justify-center text-xs md:text-sm font-bold text-emerald-100" data-r="${r}" data-c="${c}">${grid[r][c]}</div>`;
+  html += '</div>';
+  container.innerHTML = html;
+
+  const cells = container.querySelectorAll('.cell');
+  cells.forEach(cell => {
+    cell.addEventListener('pointerdown', onStart);
+    cell.addEventListener('pointerenter', onMove);
+    cell.addEventListener('pointerup', onEnd);
+  });
+  container.addEventListener('pointerup', onEnd);
+}
+
+function renderWordList() {
+  const ul = document.getElementById('word-list');
+  ul.innerHTML = WORDS.map(w => `<li id="wl-${w}" class="text-emerald-200 text-sm font-medium ${foundWords.has(w)?'word-found':''}">${w}</li>`).join('');
+}
+
+function getCellsBetween(r1,c1,r2,c2) {
+  const dr = Math.sign(r2-r1), dc = Math.sign(c2-c1);
+  const dist = Math.max(Math.abs(r2-r1), Math.abs(c2-c1));
+  if (r1===r2&&c1===c2) return [{r:r1,c:c1}];
+  if (r1!==r2&&c1!==c2&&Math.abs(r2-r1)!==Math.abs(c2-c1)) return [];
+  const cells = [];
+  for (let i = 0; i <= dist; i++) cells.push({r:r1+dr*i, c:c1+dc*i});
+  return cells;
+}
+
+function onStart(e) {
+  e.preventDefault();
+  selecting = true;
+  startCell = {r:+e.target.dataset.r, c:+e.target.dataset.c};
+  highlightCells([startCell]);
+}
+
+function onMove(e) {
+  if (!selecting) return;
+  const r = +e.target.dataset.r, c = +e.target.dataset.c;
+  const cells = getCellsBetween(startCell.r, startCell.c, r, c);
+  highlightCells(cells);
+}
+
+function onEnd() {
+  if (!selecting) return;
+  selecting = false;
+  const selected = currentCells.map(({r,c}) => grid[r][c]).join('');
+  const reversed = [...selected].reverse().join('');
+  
+  let foundWord = null;
+  for (const w of WORDS) {
+    if (!foundWords.has(w) && (selected === w || reversed === w)) { foundWord = w; break; }
+  }
+
+  clearHighlight();
+  if (foundWord) {
+    foundWords.add(foundWord);
+    currentCells.forEach(({r,c}) => {
+      document.querySelector(`[data-r="${r}"][data-c="${c}"]`).classList.add('found');
+    });
+    renderWordList();
+    document.getElementById('counter').textContent = `${foundWords.size} / 10 encontradas`;
+    if (foundWords.size === WORDS.length) document.getElementById('win-msg').classList.remove('hidden');
+  }
+  currentCells = [];
+}
+
+function highlightCells(cells) {
+  clearHighlight();
+  currentCells = cells;
+  cells.forEach(({r,c}) => {
+    const el = document.querySelector(`[data-r="${r}"][data-c="${c}"]`);
+    if (el && !el.classList.contains('found')) el.classList.add('selecting');
+  });
+}
+
+function clearHighlight() {
+  document.querySelectorAll('.selecting').forEach(el => el.classList.remove('selecting'));
+}
+
+initGrid();
+renderGrid();
+renderWordList();
+
+// Element SDK
+const defaultConfig = { title: '🌍 Sopa de Letras', background_color: '#064e3b', surface_color: '#022c22', text_color: '#d1fae5', accent_color: '#34d399', secondary_color: '#065f46', font_family: 'Outfit', font_size: 14 };
+
+window.elementSdk.init({
+  defaultConfig,
+  onConfigChange: async (config) => {
+    const t = config.title || defaultConfig.title;
+    document.getElementById('main-title').textContent = t;
+    const bg = config.background_color || defaultConfig.background_color;
+    document.getElementById('app').style.background = bg;
+    const txt = config.text_color || defaultConfig.text_color;
+    document.getElementById('main-title').style.color = txt;
+    const font = config.font_family || defaultConfig.font_family;
+    document.getElementById('app').style.fontFamily = `${font}, Outfit, sans-serif`;
+    const size = config.font_size || defaultConfig.font_size;
+    document.querySelectorAll('.cell').forEach(c => c.style.fontSize = size + 'px');
+  },
+  mapToCapabilities: (config) => ({
+    recolorables: [
+      { get: () => config.background_color || defaultConfig.background_color, set: v => { config.background_color = v; window.elementSdk.setConfig({background_color:v}); }},
+      { get: () => config.surface_color || defaultConfig.surface_color, set: v => { config.surface_color = v; window.elementSdk.setConfig({surface_color:v}); }},
+      { get: () => config.text_color || defaultConfig.text_color, set: v => { config.text_color = v; window.elementSdk.setConfig({text_color:v}); }},
+      { get: () => config.accent_color || defaultConfig.accent_color, set: v => { config.accent_color = v; window.elementSdk.setConfig({accent_color:v}); }},
+      { get: () => config.secondary_color || defaultConfig.secondary_color, set: v => { config.secondary_color = v; window.elementSdk.setConfig({secondary_color:v}); }}
+    ],
+    borderables: [],
+    fontEditable: { get: () => config.font_family || defaultConfig.font_family, set: v => { config.font_family = v; window.elementSdk.setConfig({font_family:v}); }},
+    fontSizeable: { get: () => config.font_size || defaultConfig.font_size, set: v => { config.font_size = v; window.elementSdk.setConfig({font_size:v}); }}
+  }),
+  mapToEditPanelValues: (config) => new Map([['title', config.title || defaultConfig.title]])
+});
+
+lucide.createIcons();
+</script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a04ac0e52de01f2f',t:'MTc4MDI4MDU3Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
